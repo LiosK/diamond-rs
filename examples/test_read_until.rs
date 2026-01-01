@@ -1,11 +1,9 @@
 use std::{io, str};
 
-use diamond_op::Diamond;
-
 fn main() -> io::Result<()> {
     let mut i = 0;
     let mut buf = Vec::new();
-    let mut diamond = Diamond::default();
+    let mut diamond = diamond_op::new();
     while diamond.read_until(b'\n', &mut buf)? != 0 {
         print!("[{}] {}", i, as_str(&buf)?);
         buf.clear();

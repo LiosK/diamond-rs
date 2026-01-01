@@ -1,4 +1,18 @@
+//! Perl-like diamond operator for Rust
+//!
+//! ```rust
+//! for line in diamond_op::new().line_iter() {
+//!     print!("{}", line?);
+//! }
+//! # Ok::<(), std::io::Error>(())
+//! ```
+
 use std::{env, ffi, fs, io, iter};
+
+/// Returns a diamond operator instance.
+pub fn new() -> Diamond {
+    Diamond::default()
+}
 
 /// A structure that reads lines from multiple files or standard input like Perl's diamond (`<>`)
 /// operator.
