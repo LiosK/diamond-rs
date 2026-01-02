@@ -1,21 +1,32 @@
 //! Perl-like diamond operator for Rust
 //!
 //! ```rust
-//! for line in diamond_op::new().line_iter() {
-//!     print!("{}", line?);
+//! // Prints all lines from files and standard input specified by command line
+//! // arguments or from standard input if no argument is given.
+//! fn main() {
+//!     for line in diamond_op::new().line_iter() {
+//!         print!("{}", line.expect("failed to read line"));
+//!     }
 //! }
-//! # Ok::<(), std::io::Error>(())
+//! ```
+//!
+//! ```bash
+//! # Prints all lines from file1.txt, file2.txt, standard input, and file3.txt.
+//! mycmd file1.txt file2.txt - file3.txt
 //! ```
 
 use std::{env, ffi, fs, io, iter};
 
 /// Returns a diamond operator instance.
+///
+/// See the [crate documentation](crate) or [`Diamond`] for usage examples.
 pub fn new() -> Diamond {
     Diamond::default()
 }
 
-/// A structure that reads lines from multiple files or standard input like Perl's diamond (`<>`)
-/// operator.
+/// A structure that reads lines, like Perl's diamond (`<>`) operator and many Unix filter programs,
+/// from files and standard input ("-") specified by command line arguments or from standard input
+/// if no argument is given.
 #[derive(Default)]
 pub struct Diamond {
     inner: DiamondInner<Box<dyn io::BufRead>, Readers<Args>>,
@@ -23,21 +34,88 @@ pub struct Diamond {
 
 impl Diamond {
     /// Reads all bytes into `buf` until the delimiter `byte` or EOF is reached.
+    ///
+    /// This function works in the same way as [`BufRead::read_until`], except that it also returns
+    /// at the EOF of each file or standard input that does not end with the `byte`.
+    ///
+    /// [`BufRead::read_until`]: io::BufRead::read_until
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// let mut buf = Vec::new();
+    /// let mut diamond = diamond_op::new();
+    /// while diamond.read_until(b'\n', &mut buf)? != 0 {
+    ///     print!("{}", String::from_utf8_lossy(&buf));
+    ///     buf.clear();
+    /// }
+    /// # Ok::<(), std::io::Error>(())
+    /// ```
     pub fn read_until(&mut self, byte: u8, buf: &mut Vec<u8>) -> io::Result<usize> {
         self.inner.read_until(byte, buf)
     }
 
     /// Reads all bytes into `buf` until a newline (the `0xA` byte) or EOF is reached.
+    ///
+    /// This function works in the same way as [`BufRead::read_line`], except that it also returns
+    /// at the EOF of each file or standard input that does not end with a newline byte.
+    ///
+    /// [`BufRead::read_line`]: io::BufRead::read_line
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// let mut buf = String::new();
+    /// let mut diamond = diamond_op::new();
+    /// while diamond.read_line(&mut buf)? != 0 {
+    ///     print!("{}", buf);
+    ///     buf.clear();
+    /// }
+    /// # Ok::<(), std::io::Error>(())
+    /// ```
     pub fn read_line(&mut self, buf: &mut String) -> io::Result<usize> {
         self.inner.read_line(buf)
     }
 
-    /// Returns an iterator over the lines of all files or standard input.
+    /// Returns an iterator over the lines of all files and standard input.
+    ///
+    /// The returned iterator essentially calls [`read_line`](Self::read_line) on a new `String`
+    /// buffer for each iteration and yields it as is. Accordingly, it is different from the
+    /// iterator returned from [`BufRead::lines`] in the following points:
+    ///
+    /// - It also returns at the EOF of each file or standard input that does not end with a
+    ///   newline byte.
+    /// - It does not strip the newline byte from the end of each line.
+    ///
+    /// [`BufRead::lines`]: io::BufRead::lines
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// for line in diamond_op::new().line_iter() {
+    ///     print!("{}", line?);
+    /// }
+    /// # Ok::<(), std::io::Error>(())
+    /// ```
     pub fn line_iter(self) -> impl Iterator<Item = io::Result<String>> {
         self.inner.line_iter()
     }
 
     /// Returns a reader that reads bytes as a single stream.
+    ///
+    /// The returned reader reads bytes treating all files and standard input as a consolidated
+    /// single stream and ignoring the EOF of each file or standard input in between, which is
+    /// different from the behavior of other methods in this type.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use std::io::Read as _;
+    /// let mut buf = String::new();
+    /// diamond_op::new().reader().read_to_string(&mut buf)?;
+    /// print!("{}", buf);
+    /// # Ok::<(), std::io::Error>(())
+    /// ```
     pub fn reader(self) -> impl io::Read {
         self.inner.reader()
     }
