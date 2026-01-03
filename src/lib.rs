@@ -196,7 +196,7 @@ impl<R, I: Default> Default for DiamondInner<R, I> {
 
 /// A command line argument iterator that returns "-" if none is given.
 #[derive(Debug, Default)]
-struct Args(Option<iter::Skip<iter::Fuse<env::ArgsOs>>>);
+struct Args(Option<iter::Fuse<env::ArgsOs>>);
 
 impl Iterator for Args {
     type Item = ffi::OsString;
@@ -205,7 +205,8 @@ impl Iterator for Args {
         if let Some(args) = &mut self.0 {
             args.next()
         } else {
-            let args = env::args_os().fuse().skip(1);
+            let mut args = env::args_os().fuse();
+            args.next(); // skip program name
             self.0.insert(args).next().or_else(|| Some("-".into()))
         }
     }
