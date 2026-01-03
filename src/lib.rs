@@ -27,9 +27,9 @@ pub fn new() -> Diamond {
 /// A structure that reads lines, like Perl's diamond (`<>`) operator and many Unix filter programs,
 /// from files and standard input ("-") specified by command line arguments or from standard input
 /// if no argument is given.
-#[derive(Default)]
+#[derive(Debug, Default)]
 pub struct Diamond {
-    inner: DiamondInner<Box<dyn io::BufRead>, Readers<Args>>,
+    inner: DiamondInner<Reader, Readers<Args>>,
 }
 
 impl Diamond {
@@ -221,17 +221,52 @@ where
     T: Iterator<Item = U>,
     U: AsRef<ffi::OsStr>,
 {
-    type Item = io::Result<Box<dyn io::BufRead>>;
+    type Item = io::Result<Reader>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        self.0.next().map(|arg| {
-            let arg = arg.as_ref();
-            if arg == "-" {
-                Ok(Box::new(io::stdin().lock()) as Box<dyn io::BufRead>)
-            } else {
-                let file = fs::File::open(arg)?;
-                Ok(Box::new(io::BufReader::new(file)) as Box<dyn io::BufRead>)
-            }
-        })
+        self.0.next().map(|arg| Reader::open(arg.as_ref()))
+    }
+}
+
+#[derive(Debug)]
+#[non_exhaustive]
+enum Reader {
+    Stdin(io::StdinLock<'static>),
+    File(io::BufReader<fs::File>),
+}
+
+impl Reader {
+    fn open(arg: &ffi::OsStr) -> io::Result<Self> {
+        if arg == "-" {
+            Ok(Self::Stdin(io::stdin().lock()))
+        } else {
+            let file = fs::File::open(arg)?;
+            Ok(Self::File(io::BufReader::new(file)))
+        }
+    }
+}
+
+impl io::Read for Reader {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        use io::BufRead as _;
+        let n = self.fill_buf()?.read(buf)?;
+        self.consume(n);
+        Ok(n)
+    }
+}
+
+impl io::BufRead for Reader {
+    fn fill_buf(&mut self) -> io::Result<&[u8]> {
+        match self {
+            Self::Stdin(r) => r.fill_buf(),
+            Self::File(r) => r.fill_buf(),
+        }
+    }
+
+    fn consume(&mut self, amount: usize) {
+        match self {
+            Self::Stdin(r) => r.consume(amount),
+            Self::File(r) => r.consume(amount),
+        }
     }
 }
