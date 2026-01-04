@@ -15,7 +15,7 @@
 //! mycmd file1.txt file2.txt - file3.txt
 //! ```
 
-use std::{env, ffi, fs, io, iter};
+use std::{env, ffi, fs, io, iter, slice};
 
 /// Returns a diamond operator instance.
 ///
@@ -103,7 +103,7 @@ impl Diamond {
 
     /// Returns a reader that reads bytes as a single stream.
     ///
-    /// The returned reader reads bytes treating all files and standard input as a consolidated
+    /// The returned reader reads bytes, treating all files and standard input as a consolidated
     /// single stream and ignoring the EOF of each file or standard input in between, which is
     /// different from the behavior of other methods in this type.
     ///
@@ -116,7 +116,7 @@ impl Diamond {
     /// print!("{}", buf);
     /// # Ok::<(), std::io::Error>(())
     /// ```
-    pub fn reader(self) -> impl io::Read {
+    pub fn reader(self) -> impl io::BufRead {
         self.inner.reader()
     }
 }
@@ -152,7 +152,7 @@ where
         })
     }
 
-    fn reader(self) -> impl io::Read {
+    fn reader(self) -> impl io::BufRead {
         struct SingleStreamReader<R, I>(DiamondInner<R, I>);
 
         impl<R, I> io::Read for SingleStreamReader<R, I>
@@ -161,7 +161,41 @@ where
             I: Iterator<Item = io::Result<R>>,
         {
             fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-                self.0.read_inner(|reader| reader.read(buf))
+                use io::BufRead as _;
+                let n = self.fill_buf()?.read(buf)?;
+                self.consume(n);
+                Ok(n)
+            }
+        }
+
+        impl<R, I> io::BufRead for SingleStreamReader<R, I>
+        where
+            R: io::BufRead,
+            I: Iterator<Item = io::Result<R>>,
+        {
+            fn fill_buf(&mut self) -> io::Result<&[u8]> {
+                loop {
+                    if let Some(reader) = &mut self.0.current {
+                        let ret = reader.fill_buf()?;
+                        if !ret.is_empty() {
+                            // Intends to `return Ok(ret);` but hacks the borrow checker to work
+                            // around the "conditional returns" limitation:
+                            // https://github.com/rust-lang/rust/issues/51545
+                            return Ok(unsafe { slice::from_raw_parts(ret.as_ptr(), ret.len()) });
+                        }
+                        self.0.current = None;
+                    } else if let Some(reader) = self.0.remaining.next() {
+                        self.0.current = Some(reader?);
+                    } else {
+                        return Ok(&[]);
+                    }
+                }
+            }
+
+            fn consume(&mut self, amount: usize) {
+                if let Some(reader) = &mut self.0.current {
+                    reader.consume(amount);
+                }
             }
         }
 
