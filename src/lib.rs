@@ -15,7 +15,8 @@
 //! mycmd file1.txt file2.txt - file3.txt
 //! ```
 
-use std::{env, ffi, fs, io, iter, slice};
+use std::io::{self, BufRead};
+use std::{env, ffi, fs, iter, slice};
 
 /// Returns a diamond operator instance.
 ///
@@ -38,8 +39,6 @@ impl Diamond {
     /// This function works in the same way as [`BufRead::read_until`], except that it also returns
     /// at the EOF of each file or standard input that does not end with the `byte`.
     ///
-    /// [`BufRead::read_until`]: io::BufRead::read_until
-    ///
     /// # Examples
     ///
     /// ```rust
@@ -59,8 +58,6 @@ impl Diamond {
     ///
     /// This function works in the same way as [`BufRead::read_line`], except that it also returns
     /// at the EOF of each file or standard input that does not end with a newline byte.
-    ///
-    /// [`BufRead::read_line`]: io::BufRead::read_line
     ///
     /// # Examples
     ///
@@ -86,8 +83,6 @@ impl Diamond {
     /// - It also returns at the EOF of each file or standard input that does not end with a
     ///   newline byte.
     /// - It does not strip the newline byte from the end of each line.
-    ///
-    /// [`BufRead::lines`]: io::BufRead::lines
     ///
     /// # Examples
     ///
@@ -116,7 +111,7 @@ impl Diamond {
     /// print!("{}", buf);
     /// # Ok::<(), std::io::Error>(())
     /// ```
-    pub fn reader(self) -> impl io::BufRead {
+    pub fn reader(self) -> impl BufRead {
         self.inner.reader()
     }
 }
@@ -130,7 +125,7 @@ struct DiamondInner<R, I> {
 
 impl<R, I> DiamondInner<R, I>
 where
-    R: io::BufRead,
+    R: BufRead,
     I: Iterator<Item = io::Result<R>>,
 {
     fn read_until(&mut self, byte: u8, buf: &mut Vec<u8>) -> io::Result<usize> {
@@ -152,25 +147,24 @@ where
         })
     }
 
-    fn reader(self) -> impl io::BufRead {
+    fn reader(self) -> impl BufRead {
         struct SingleStreamReader<R, I>(DiamondInner<R, I>);
 
         impl<R, I> io::Read for SingleStreamReader<R, I>
         where
-            R: io::BufRead,
+            R: BufRead,
             I: Iterator<Item = io::Result<R>>,
         {
             fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-                use io::BufRead as _;
                 let n = self.fill_buf()?.read(buf)?;
                 self.consume(n);
                 Ok(n)
             }
         }
 
-        impl<R, I> io::BufRead for SingleStreamReader<R, I>
+        impl<R, I> BufRead for SingleStreamReader<R, I>
         where
-            R: io::BufRead,
+            R: BufRead,
             I: Iterator<Item = io::Result<R>>,
         {
             fn fill_buf(&mut self) -> io::Result<&[u8]> {
@@ -282,14 +276,13 @@ impl Reader {
 
 impl io::Read for Reader {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-        use io::BufRead as _;
         let n = self.fill_buf()?.read(buf)?;
         self.consume(n);
         Ok(n)
     }
 }
 
-impl io::BufRead for Reader {
+impl BufRead for Reader {
     fn fill_buf(&mut self) -> io::Result<&[u8]> {
         match self {
             Self::Stdin(r) => r.fill_buf(),
