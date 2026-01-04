@@ -104,11 +104,14 @@ impl Diamond {
     ///
     /// # Examples
     ///
+    /// Note that the example below uses [`BufRead::lines`] and thus works differently from
+    /// [`line_iter`](Self::line_iter).
+    ///
     /// ```rust
-    /// use std::io::Read as _;
-    /// let mut buf = String::new();
-    /// diamond_op::new().reader().read_to_string(&mut buf)?;
-    /// print!("{}", buf);
+    /// use std::io::BufRead as _;
+    /// for line in diamond_op::new().reader().lines() {
+    ///     println!("{}", line?);
+    /// }
     /// # Ok::<(), std::io::Error>(())
     /// ```
     pub fn reader(self) -> impl BufRead {
