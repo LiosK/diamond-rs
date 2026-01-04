@@ -153,9 +153,9 @@ where
     }
 
     fn reader(self) -> impl io::Read {
-        struct Reader<R, I>(DiamondInner<R, I>);
+        struct SingleStreamReader<R, I>(DiamondInner<R, I>);
 
-        impl<R, I> io::Read for Reader<R, I>
+        impl<R, I> io::Read for SingleStreamReader<R, I>
         where
             R: io::BufRead,
             I: Iterator<Item = io::Result<R>>,
@@ -165,7 +165,7 @@ where
             }
         }
 
-        Reader(self)
+        SingleStreamReader(self)
     }
 
     fn read_inner(&mut self, mut f: impl FnMut(&mut R) -> io::Result<usize>) -> io::Result<usize> {
