@@ -276,7 +276,6 @@ impl Reader {
         }
     }
 
-    #[inline]
     fn as_buf_read_mut(&mut self) -> &mut dyn BufRead {
         match self {
             Self::Stdin(r) => r,
