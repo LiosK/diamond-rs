@@ -272,28 +272,28 @@ impl Reader {
             Ok(Self::File(io::BufReader::new(file)))
         }
     }
+
+    #[inline]
+    fn as_buf_read_mut(&mut self) -> &mut dyn BufRead {
+        match self {
+            Self::Stdin(r) => r,
+            Self::File(r) => r,
+        }
+    }
 }
 
 impl io::Read for Reader {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-        let n = self.fill_buf()?.read(buf)?;
-        self.consume(n);
-        Ok(n)
+        self.as_buf_read_mut().read(buf)
     }
 }
 
 impl BufRead for Reader {
     fn fill_buf(&mut self) -> io::Result<&[u8]> {
-        match self {
-            Self::Stdin(r) => r.fill_buf(),
-            Self::File(r) => r.fill_buf(),
-        }
+        self.as_buf_read_mut().fill_buf()
     }
 
     fn consume(&mut self, amount: usize) {
-        match self {
-            Self::Stdin(r) => r.consume(amount),
-            Self::File(r) => r.consume(amount),
-        }
+        self.as_buf_read_mut().consume(amount)
     }
 }
