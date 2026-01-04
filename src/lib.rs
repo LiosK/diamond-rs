@@ -299,4 +299,12 @@ impl BufRead for Reader {
     fn consume(&mut self, amount: usize) {
         self.as_buf_read_mut().consume(amount)
     }
+
+    fn read_until(&mut self, byte: u8, buf: &mut Vec<u8>) -> io::Result<usize> {
+        self.as_buf_read_mut().read_until(byte, buf)
+    }
+
+    fn read_line(&mut self, buf: &mut String) -> io::Result<usize> {
+        self.as_buf_read_mut().read_line(buf)
+    }
 }
