@@ -30,7 +30,7 @@ pub fn new() -> Diamond {
 /// if no argument is given.
 #[derive(Debug, Default)]
 pub struct Diamond {
-    reader: Option<Reader>,
+    cur_file: Option<Reader>,
     args: Args,
 }
 
@@ -136,7 +136,7 @@ impl Diamond {
         impl BufRead for SingleStreamReader {
             fn fill_buf(&mut self) -> io::Result<&[u8]> {
                 loop {
-                    if let Some(reader) = &mut self.0.reader {
+                    if let Some(reader) = &mut self.0.cur_file {
                         let ret = reader.as_buf_read_mut().fill_buf()?;
                         if !ret.is_empty() {
                             // Intends to `return Ok(ret);` but hacks the borrow checker to work
@@ -144,17 +144,15 @@ impl Diamond {
                             // https://github.com/rust-lang/rust/issues/51545
                             return Ok(unsafe { slice::from_raw_parts(ret.as_ptr(), ret.len()) });
                         }
-                        self.0.reader = None;
-                    } else if let Some(arg) = self.0.args.next() {
-                        self.0.reader = Some(Reader::open(&arg)?);
-                    } else {
+                    }
+                    if !self.0.prepare_next()? {
                         return Ok(&[]);
                     }
                 }
             }
 
             fn consume(&mut self, amount: usize) {
-                if let Some(reader) = &mut self.0.reader {
+                if let Some(reader) = &mut self.0.cur_file {
                     reader.as_buf_read_mut().consume(amount);
                 }
             }
@@ -168,17 +166,25 @@ impl Diamond {
         mut f: impl FnMut(&mut dyn BufRead) -> io::Result<usize>,
     ) -> io::Result<usize> {
         loop {
-            if let Some(reader) = &mut self.reader {
+            if let Some(reader) = &mut self.cur_file {
                 let ret = f(reader.as_buf_read_mut())?;
                 if ret != 0 {
                     return Ok(ret);
                 }
-                self.reader = None;
-            } else if let Some(arg) = self.args.next() {
-                self.reader = Some(Reader::open(&arg)?);
-            } else {
+            }
+            if !self.prepare_next()? {
                 return Ok(0);
             }
+        }
+    }
+
+    fn prepare_next(&mut self) -> io::Result<bool> {
+        self.cur_file = None;
+        if let Some(arg) = self.args.next() {
+            self.cur_file = Some(Reader::open(&arg)?);
+            Ok(true)
+        } else {
+            Ok(false)
         }
     }
 }
