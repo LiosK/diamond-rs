@@ -31,6 +31,7 @@ pub fn new() -> Diamond {
 #[derive(Debug, Default)]
 pub struct Diamond {
     cur_file: Option<Reader>,
+    cur_arg: Option<ffi::OsString>,
     args: Args,
 }
 
@@ -180,8 +181,9 @@ impl Diamond {
 
     fn prepare_next(&mut self) -> io::Result<bool> {
         self.cur_file = None;
-        if let Some(arg) = self.args.next() {
-            self.cur_file = Some(Reader::open(&arg)?);
+        self.cur_arg = self.args.next();
+        if let Some(arg) = self.cur_arg.as_deref() {
+            self.cur_file = Some(Reader::open(arg)?);
             Ok(true)
         } else {
             Ok(false)
