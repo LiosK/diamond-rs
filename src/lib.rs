@@ -30,7 +30,8 @@ pub fn new() -> Diamond {
 /// if no argument is given.
 #[derive(Debug, Default)]
 pub struct Diamond {
-    inner: DiamondInner<Reader, Readers<Args>>,
+    reader: Option<Reader>,
+    args: Args,
 }
 
 impl Diamond {
@@ -51,7 +52,7 @@ impl Diamond {
     /// # Ok::<(), std::io::Error>(())
     /// ```
     pub fn read_until(&mut self, byte: u8, buf: &mut Vec<u8>) -> io::Result<usize> {
-        self.inner.read_until(byte, buf)
+        self.read_inner(|reader| reader.read_until(byte, buf))
     }
 
     /// Reads all bytes into `buf` until a newline (the `0xA` byte) or EOF is reached.
@@ -71,7 +72,7 @@ impl Diamond {
     /// # Ok::<(), std::io::Error>(())
     /// ```
     pub fn read_line(&mut self, buf: &mut String) -> io::Result<usize> {
-        self.inner.read_line(buf)
+        self.read_inner(|reader| reader.read_line(buf))
     }
 
     /// Returns an iterator over the lines of all files and standard input.
@@ -92,8 +93,15 @@ impl Diamond {
     /// }
     /// # Ok::<(), std::io::Error>(())
     /// ```
-    pub fn line_iter(self) -> impl Iterator<Item = io::Result<String>> {
-        self.inner.line_iter()
+    pub fn line_iter(mut self) -> impl Iterator<Item = io::Result<String>> {
+        iter::from_fn(move || {
+            let mut buf = String::new();
+            match self.read_line(&mut buf) {
+                Ok(0) => None,
+                Ok(_) => Some(Ok(buf)),
+                Err(e) => Some(Err(e)),
+            }
+        })
     }
 
     /// Returns a reader that reads bytes as a single stream.
@@ -115,49 +123,9 @@ impl Diamond {
     /// # Ok::<(), std::io::Error>(())
     /// ```
     pub fn reader(self) -> impl BufRead {
-        self.inner.reader()
-    }
-}
+        struct SingleStreamReader(Diamond);
 
-/// The inner structure separated for easier testing and to internal type hiding.
-#[derive(Debug)]
-struct DiamondInner<R, I> {
-    current: Option<R>,
-    remaining: I,
-}
-
-impl<R, I> DiamondInner<R, I>
-where
-    R: BufRead,
-    I: Iterator<Item = io::Result<R>>,
-{
-    fn read_until(&mut self, byte: u8, buf: &mut Vec<u8>) -> io::Result<usize> {
-        self.read_inner(|reader| reader.read_until(byte, buf))
-    }
-
-    fn read_line(&mut self, buf: &mut String) -> io::Result<usize> {
-        self.read_inner(|reader| reader.read_line(buf))
-    }
-
-    fn line_iter(mut self) -> impl Iterator<Item = io::Result<String>> {
-        iter::from_fn(move || {
-            let mut buf = String::new();
-            match self.read_line(&mut buf) {
-                Ok(0) => None,
-                Ok(_) => Some(Ok(buf)),
-                Err(e) => Some(Err(e)),
-            }
-        })
-    }
-
-    fn reader(self) -> impl BufRead {
-        struct SingleStreamReader<R, I>(DiamondInner<R, I>);
-
-        impl<R, I> io::Read for SingleStreamReader<R, I>
-        where
-            R: BufRead,
-            I: Iterator<Item = io::Result<R>>,
-        {
+        impl io::Read for SingleStreamReader {
             fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
                 let n = self.fill_buf()?.read(buf)?;
                 self.consume(n);
@@ -165,24 +133,20 @@ where
             }
         }
 
-        impl<R, I> BufRead for SingleStreamReader<R, I>
-        where
-            R: BufRead,
-            I: Iterator<Item = io::Result<R>>,
-        {
+        impl BufRead for SingleStreamReader {
             fn fill_buf(&mut self) -> io::Result<&[u8]> {
                 loop {
-                    if let Some(reader) = &mut self.0.current {
-                        let ret = reader.fill_buf()?;
+                    if let Some(reader) = &mut self.0.reader {
+                        let ret = reader.as_buf_read_mut().fill_buf()?;
                         if !ret.is_empty() {
                             // Intends to `return Ok(ret);` but hacks the borrow checker to work
                             // around the "conditional returns" limitation:
                             // https://github.com/rust-lang/rust/issues/51545
                             return Ok(unsafe { slice::from_raw_parts(ret.as_ptr(), ret.len()) });
                         }
-                        self.0.current = None;
-                    } else if let Some(reader) = self.0.remaining.next() {
-                        self.0.current = Some(reader?);
+                        self.0.reader = None;
+                    } else if let Some(arg) = self.0.args.next() {
+                        self.0.reader = Some(Reader::open(&arg)?);
                     } else {
                         return Ok(&[]);
                     }
@@ -190,8 +154,8 @@ where
             }
 
             fn consume(&mut self, amount: usize) {
-                if let Some(reader) = &mut self.0.current {
-                    reader.consume(amount);
+                if let Some(reader) = &mut self.0.reader {
+                    reader.as_buf_read_mut().consume(amount);
                 }
             }
         }
@@ -199,28 +163,22 @@ where
         SingleStreamReader(self)
     }
 
-    fn read_inner(&mut self, mut f: impl FnMut(&mut R) -> io::Result<usize>) -> io::Result<usize> {
+    fn read_inner(
+        &mut self,
+        mut f: impl FnMut(&mut dyn BufRead) -> io::Result<usize>,
+    ) -> io::Result<usize> {
         loop {
-            if let Some(reader) = &mut self.current {
-                let ret = f(reader)?;
+            if let Some(reader) = &mut self.reader {
+                let ret = f(reader.as_buf_read_mut())?;
                 if ret != 0 {
                     return Ok(ret);
                 }
-                self.current = None;
-            } else if let Some(reader) = self.remaining.next() {
-                self.current = Some(reader?);
+                self.reader = None;
+            } else if let Some(arg) = self.args.next() {
+                self.reader = Some(Reader::open(&arg)?);
             } else {
                 return Ok(0);
             }
-        }
-    }
-}
-
-impl<R, I: Default> Default for DiamondInner<R, I> {
-    fn default() -> Self {
-        Self {
-            current: None,
-            remaining: I::default(),
         }
     }
 }
@@ -240,22 +198,6 @@ impl Iterator for Args {
             args.next(); // skip program name
             self.0.insert(args).next().or_else(|| Some("-".into()))
         }
-    }
-}
-
-/// An iterator transformer that yields buffered readers from command line arguments.
-#[derive(Debug, Default)]
-struct Readers<T>(T);
-
-impl<T, U> Iterator for Readers<T>
-where
-    T: Iterator<Item = U>,
-    U: AsRef<ffi::OsStr>,
-{
-    type Item = io::Result<Reader>;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        self.0.next().map(|arg| Reader::open(arg.as_ref()))
     }
 }
 
@@ -281,29 +223,5 @@ impl Reader {
             Self::Stdin(r) => r,
             Self::File(r) => r,
         }
-    }
-}
-
-impl io::Read for Reader {
-    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-        self.as_buf_read_mut().read(buf)
-    }
-}
-
-impl BufRead for Reader {
-    fn fill_buf(&mut self) -> io::Result<&[u8]> {
-        self.as_buf_read_mut().fill_buf()
-    }
-
-    fn consume(&mut self, amount: usize) {
-        self.as_buf_read_mut().consume(amount)
-    }
-
-    fn read_until(&mut self, byte: u8, buf: &mut Vec<u8>) -> io::Result<usize> {
-        self.as_buf_read_mut().read_until(byte, buf)
-    }
-
-    fn read_line(&mut self, buf: &mut String) -> io::Result<usize> {
-        self.as_buf_read_mut().read_line(buf)
     }
 }
