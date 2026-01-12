@@ -162,6 +162,12 @@ impl Diamond {
         SingleStreamReader(self)
     }
 
+    /// Returns the command line argument currently being processed or `None` before the first line
+    /// has been read or after all the files have been read.
+    pub fn current_arg(&self) -> Option<&ffi::OsStr> {
+        self.cur_arg.as_deref()
+    }
+
     fn read_inner(
         &mut self,
         mut f: impl FnMut(&mut dyn BufRead) -> io::Result<usize>,
